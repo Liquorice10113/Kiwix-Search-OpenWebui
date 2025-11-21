@@ -88,6 +88,8 @@ class KiwixSearchHelper:
                 for term in query_lower.split():
                     if term in title:
                         score += 5
+                if all((term in snippet for term in query_lower.split())):
+                    score += 2
                 score -= len(title) // 20  # shorter title better
                 results[i] = (result, score)
             results.sort(key=lambda x: x[1], reverse=True)
@@ -187,7 +189,7 @@ class Tools:
 
     async def search(
         self, query: str, __event_emitter__: Callable[[dict], Any] = None
-    ) -> list:
+    ) -> str:
         """
         Kiwix search tool. Use one or two keyword for query instead of natural language sentences for better results, avoid "what is", "explain", etc. Eg. User: "Explain options trading" -> query: "options trading". Do not give mutliple queries at once, avoid "terms1, terms2".
         :param query: The search query string.
@@ -206,8 +208,10 @@ class Tools:
 
 
 if __name__ == "__main__":
+
     async def event_emitter(event: dict):
         print(event)
+
     tool = Tools()
     query = "pip"
     results = asyncio.run(tool.search(query=query, __event_emitter__=event_emitter))
