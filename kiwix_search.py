@@ -152,7 +152,7 @@ class KiwixSearchHelper:
         return text
 
     def tokens_count(self, text: str) -> int:
-        return len(text.split())
+        return int(len(text) / 4)
 
     def format_results(self, results: list) -> str:
         formatted = ""
@@ -187,23 +187,27 @@ class Tools:
     def __init__(self):
         self.valves = self.Valves()
 
-    async def search(
+    async def kiwix_search(
         self, query: str, __event_emitter__: Callable[[dict], Any] = None
     ) -> str:
         """
-        Kiwix search tool. Use one or two keyword for query instead of natural language sentences for better results, avoid "what is", "explain", etc. Eg. User: "Explain options trading" -> query: "options trading". Do not give mutliple queries at once, avoid "terms1, terms2".
+        Kiwix search tool. Use *one or two keywords* for query instead of natural language sentences for better results, avoid "what is", "explain", etc. Eg. User: "Explain options trading" -> query("options trading"). Do not give mutliple queries at once, avoid query("terms1 terms2 terms3 terms4 terms5...") and avoid using too many keywords, again, *one or two keywords* is recommended, long list of keywords may cause no results.
         :param query: The search query string.
         :return: The search results as a formatted string.
         """
         helper = KiwixSearchHelper(
             self.valves.KIWIX_BASE_URL, event_emitter=__event_emitter__
         )
+        query = query.strip().split()[:5]  # limit to 5 words
+        query = " ".join(query)
         results = await helper.search(
             query=query,
             books=self.valves.BOOKS,
             results_per_book=self.valves.RESULTS_PER_BOOK,
             page_content_words_limit=self.valves.PAGE_CONTENT_WORDS_LIMIT,
         )
+        if len(results) == 0:
+            results = "No results found. Hint: use one or two keywords for query, long list of keywords may cause no results."
         return results
 
 
