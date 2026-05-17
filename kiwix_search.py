@@ -148,7 +148,9 @@ class KiwixSearchHelper:
             text = text.replace("\n\n", "\n")
         # filter ref like [1], [2]
         text = re.sub(r"\[\d+\]", " ", text)
+        text = text.split()
         text = text[:page_content_words_limit]
+        text = " ".join(text)
         return text
 
     def tokens_count(self, text: str) -> int:
