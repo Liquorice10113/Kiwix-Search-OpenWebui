@@ -27,10 +27,7 @@ class KiwixSearchHelper:
         self,
         query: str,
         books: str,
-        results_per_book: int,
-        page_content_words_limit: int,
     ) -> str:
-        final_results = []
         for book in books.split(","):
             book = book.strip().rstrip(".zim")
             search_url = f"{self.kiwix_url}/search?books.name={book}&pattern={query}"
@@ -65,83 +62,60 @@ class KiwixSearchHelper:
                 if title.startswith("User:") or title.startswith("Talk:"):
                     continue
                 link = result.find("a")["href"]
+                article_id = link.split("content/")[-1].split("?")[0]
                 try:
                     snippet = result.find("cite").text.replace("\n", " ").strip()
                 except:
                     snippet = ""
-                results.append(
-                    {
-                        "title": title,
-                        "link": link,
-                        "snippet": snippet,
-                        "from_book": book,
-                    }
-                )
-
-            # Simple rerank
-            results = [(i, 0) for i in results]
-            for i, (result, _) in enumerate(results):
-                score = 0
-                title = result["title"].lower()
-                snippet = result["snippet"].lower()
-                query_lower = query.lower()
-                for term in query_lower.split():
-                    if term in title:
-                        score += 5
-                if all((term in snippet for term in query_lower.split())):
-                    score += 2
-                score -= len(title) // 20  # shorter title better
-                results[i] = (result, score)
-            results.sort(key=lambda x: x[1], reverse=True)
-
-            # print("Reranked results:")
-            # for res, sc in results:
-            #     print(f"Score: {sc}, Title: {res['title']}")
-            # Fetch page contents for top results
-            for result, _ in results[:results_per_book]:
-                title = result["title"]
-                link = result["link"]
-                snippet = result["snippet"]
-                from_book = result["from_book"]
-                # Extract the page content
-                if self.https:
-                    page_response = requests.get(
-                        f"https://{self.kiwix_host}{link}", headers=self.headers
+                if snippet:
+                    results.append(
+                        {
+                            "title": title,
+                            "snippet": snippet,
+                            "from_book": book,
+                            "article_id": article_id,
+                        }
                     )
-                else:
-                    page_response = requests.get(
-                        f"http://{self.kiwix_host}{link}", headers=self.headers
-                    )
-                if page_response.status_code == 200:
-                    page_soup = Soup(page_response.text, "html.parser")
-                    content = page_soup.get_text()
-                    content = self.text_post_process(content, page_content_words_limit)
-                else:
-                    content = "Failed to retrieve content"
-                final_results.append(
-                    {
-                        "title": title,
-                        "link": (
-                            f"https://{self.kiwix_host}{link}"
-                            if self.https
-                            else f"http://{self.kiwix_host}{link}"
-                        ),
-                        "content": content,
-                        "from_book": book,
-                    }
-                )
-        formatted_results = self.format_results(final_results)
+        results = results[:10] # limit to 10 results
+        formatted_results = self.format_results(results)
         await self.event_emitter(
             {
                 "type": "status",
                 "data": {
                     "status": "completed",
-                    "description": f"Completed search for {len(books.split(','))} books and found {len(final_results)} results. Approximately {self.tokens_count( formatted_results )} tokens.",
+                    "description": f"Completed search for {len(books.split(','))} books and found {len(results)} results.",
                     "done": True,
                 },
             }
         )
         return formatted_results
+
+    async def view_page(
+        self, article_id: str, page_content_words_limit: int
+    ) -> str:
+        """
+        View the content of a page by its article ID.
+        :param article_id: The article ID of the page to view.
+        :param page_content_words_limit: The maximum number of words to include in the returned content.
+        :return: The content of the page as a string.
+        """
+        page_url = f"{self.kiwix_url}/content/{article_id}"
+        response = requests.get(page_url, headers=self.headers)
+        if response.status_code != 200:
+            return f"Failed to retrieve content for article ID {article_id}. Status code: {response.status_code}"
+        soup = Soup(response.text, "html.parser")
+        content = soup.get_text()
+        content = self.text_post_process(content, page_content_words_limit)
+        await self.event_emitter(
+            {
+                "type": "status",
+                "data": {
+                    "status": "completed",
+                    "description": f"{article_id}: approximately {self.tokens_count(content)} tokens.",
+                },
+            }
+        )
+        return content
 
     def text_post_process(self, text: str, page_content_words_limit: int) -> str:
         while "\n\n" in text:
@@ -159,11 +133,12 @@ class KiwixSearchHelper:
     def format_results(self, results: list) -> str:
         formatted = ""
         for result in results:
-            formatted += f"Title: {result['title']}\n"
-            formatted += f"Link: {result['link']}\n"
-            formatted += f"Content: {result['content']}\n"
-            formatted += f"From Book: {result['from_book']}\n"
+            formatted += f"book_name: {result['from_book']}\n"
+            formatted += f"title: {result['title']}\n"
+            formatted += f"article_id: {result['article_id']}\n"
+            formatted += f"snippet: {result['snippet']}\n"
             formatted += "\n\n---\n\n"
+        formatted += "Use the relevant `article_id`, call `kiwix_view_article(article_id)` to view the content of the page.\n"
         return formatted
 
 
@@ -171,15 +146,11 @@ class Tools:
     class Valves(BaseModel):
         KIWIX_BASE_URL: str = Field(
             default="http://127.0.0.1:80",
-            description="The base URL for Kiwix",
+            description="The base URL for Kiwix Server.",
         )
         BOOKS: str = Field(
-            default="wikipedia_en_all_maxi_2025-08",
+            default="wikipedia_en_all_maxi_2026-02",
             description="Comma-separated list of Kiwix books to search.",
-        )
-        RESULTS_PER_BOOK: int = Field(
-            default=3,
-            description="The number of results to return per Kiwix book.",
         )
         PAGE_CONTENT_WORDS_LIMIT: int = Field(
             default=5000,
@@ -205,12 +176,27 @@ class Tools:
         results = await helper.search(
             query=query,
             books=self.valves.BOOKS,
-            results_per_book=self.valves.RESULTS_PER_BOOK,
-            page_content_words_limit=self.valves.PAGE_CONTENT_WORDS_LIMIT,
         )
         if len(results) == 0:
             results = "No results found. Hint: use one or two keywords for query, long list of keywords may cause no results."
         return results
+
+    async def kiwix_view_article(
+        self, article_id: str, __event_emitter__: Callable[[dict], Any] = None
+    ) -> str:
+        """
+        View the content of a Kiwix article by its article ID.
+        :param article_id: The article ID of the page to view.
+        :return: The content of the page as a string.
+        """
+        helper = KiwixSearchHelper(
+            self.valves.KIWIX_BASE_URL, event_emitter=__event_emitter__
+        )
+        content = await helper.view_page(
+            article_id=article_id,
+            page_content_words_limit=self.valves.PAGE_CONTENT_WORDS_LIMIT,
+        )
+        return content
 
 
 if __name__ == "__main__":
@@ -220,6 +206,16 @@ if __name__ == "__main__":
 
     tool = Tools()
     query = "pip"
-    results = asyncio.run(tool.search(query=query, __event_emitter__=event_emitter))
-    # print("Final Results:")
-    # print(results)
+    results = asyncio.run(
+        tool.kiwix_search(query=query, __event_emitter__=event_emitter)
+    )
+    print("Final Results:")
+    print(results)
+    result = asyncio.run(
+        tool.kiwix_view_article(
+            article_id="wikipedia_en_all_maxi_2026-02/Pip_(Moby-Dick_character)",
+            __event_emitter__=event_emitter,
+        )
+    )
+    print("Article Content:")
+    print(result)
