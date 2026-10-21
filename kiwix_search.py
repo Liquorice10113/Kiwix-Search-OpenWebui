@@ -28,6 +28,7 @@ class KiwixSearchHelper:
         query: str,
         books: str,
     ) -> str:
+        results = []
         for book in books.split(","):
             book = book.strip().rstrip(".zim")
             search_url = f"{self.kiwix_url}/search?books.name={book}&pattern={query}"
@@ -55,7 +56,7 @@ class KiwixSearchHelper:
                     }
                 )
                 continue
-            results = []
+            book_results = []
             soup = Soup(response.text, "html.parser")
             for i, result in enumerate(soup.find_all("li")):
                 title = result.find("a").text.replace("\n", " ").strip()
@@ -68,7 +69,7 @@ class KiwixSearchHelper:
                 except:
                     snippet = ""
                 if snippet:
-                    results.append(
+                    book_results.append(
                         {
                             "title": title,
                             "snippet": snippet,
@@ -76,7 +77,7 @@ class KiwixSearchHelper:
                             "article_id": article_id,
                         }
                     )
-        results = results[:10]  # limit to 10 results
+            results.extend(book_results[:10])  # limit to 10 results per book
         formatted_results = self.format_results(results)
         await self.event_emitter(
             {
